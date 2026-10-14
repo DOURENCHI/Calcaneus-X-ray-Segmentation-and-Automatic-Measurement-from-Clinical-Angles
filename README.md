@@ -105,8 +105,10 @@ Pytorch_calcaneus/
 ├── predict_calcaneus.py        加载权重预测 + 四列对照图可视化
 ├── calcaneus_angles.py         角度公式 + 轮廓距离 + 敏感度 + 误差传导
 ├── analyze_failure_case.py     失败案例解剖（逐例指标 / 三色叠加 / 边界偏差 / 归因判定）
+├── leave_one_out.py            11 折留一交叉验证（含训练崩溃诊断与损失函数对比）
+├── demo_single_case.py         端到端单例演示（出 4 格图，单条命令可跑）
 ├── calcaneus_preprocess.py     74 张原始片脱敏与预处理
-├── run_all.py                  ★ 一键复现入口：按顺序跑完上面 7 个脚本
+├── run_all.py                  ★ 一键复现入口：按顺序跑完全部步骤
 ├── requirements.txt            依赖与版本锁定
 ├── docs/
 │   └── case13_failure_analysis.md   第 13 例失败案例的完整解剖（配图 + 数据化归因）
@@ -120,7 +122,10 @@ Pytorch_calcaneus/
     ├── calcaneus_predict_dice_*.csv   逐例 Dice / IoU
     ├── calcaneus_angles_*.{csv,png}   角度复现与误差传导结果
     ├── calcaneus_case_analysis.csv    逐例失败指标（11 例全量）
-    └── calcaneus_case13_analysis.png  第 13 例 6 格解剖图
+    ├── calcaneus_case13_analysis.png  第 13 例 6 格解剖图
+    ├── calcaneus_loo_results*.csv     留一验证逐折指标（BCE / dice_bce）
+    ├── calcaneus_loo*.png             留一验证柱状图与分布图
+    └── calcaneus_demo_case*.png       端到端演示图
 ```
 
 ## 6. 环境与运行
@@ -168,9 +173,18 @@ python calcaneus_angles.py --mask results
 # 7) 失败案例解剖（不指定 --id 时自动挑 Dice 最低的一例）
 python analyze_failure_case.py
 
-# 8) 74 张原始片脱敏预处理
+# 8) 11 折留一交叉验证（约 2 分钟）
+python leave_one_out.py
+python leave_one_out.py --loss dice_bce      # 换成 BCE+Dice 混合损失
+
+# 9) 端到端演示（单例，含与参考值的数值对照）
+python demo_single_case.py
+
+# 10) 74 张原始片脱敏预处理
 python calcaneus_preprocess.py
 ```
+
+> `run_all.py` 目前覆盖 1–7 与 10 步（留一验证与演示单独跑，因为它们不属于"训练一次就出结果"的链路）。
 
 数据根目录通过候选路径自动探测，也可用环境变量覆盖：
 
@@ -297,9 +311,77 @@ cuDNN 会自动挑选卷积算法，同一份数据两次运行可能走到不�
 **[`docs/case13_failure_analysis.md`](docs/case13_failure_analysis.md)**，
 图见 `results/calcaneus_case13_analysis.png`，可用 `python analyze_failure_case.py` 复现。
 
----
+### 7.8 留一交叉验证与训练崩溃（2026-10 新增）
 
-## 8. 代码模块说明
+**为什么做**：原来的 8/3 划分只用了 3 例当测试，Dice 在 0.88~0.96 之间跳，说好说坏都没有依据。
+留一验证让**每一例都当过一次测试样本**，于是能给一个分布，而不是三个数字。
+
+```bash
+python leave_one_out.py                       # 11 折，每折 10 例训练 / 1 例测试，约 2 分钟
+python leave_one_out.py --loss dice_bce       # 换成 BCE+Dice 混合损失
+python leave_one_out.py --only 31,73 --repeats 3   # 只跑指定折并换种子，用于诊断崩溃
+```
+
+**结果（11 折，seed=42）**
+
+| 配置 | Dice 均值 ± 标准差 | 中位数 | 四分位区间 | 最小值 | Dice<0.95 折数 |
+|---|---|---|---|---|---|
+| `BCE`（原配置） | 0.8327 ± **0.2414** | 0.9406 | 0.9012 – 0.9526 | **0.3333** | 6 / 11 |
+| `BCE + Dice` | 0.9499 ± **0.0253** | 0.9536 | 0.9449 – 0.9664 | 0.8827 | 5 / 11 |
+
+**发现了什么：11 折里有 2 折完全崩溃。**
+
+- #31 → Dice 0.3598，#73 → Dice 0.3333；两折的**预测前景占比冲到 63.8% / 68.2%**（GT 只有 14%），
+  即模型退化成「全前景」，面积比 4.5 / 4.7。
+- 这与 7.1 节 8/3 训练里观察到的「第 10–15 轮验证 Dice 塌到 0」（退化成**全背景**）是同一类现象的两个方向。
+
+**崩溃是「种子依赖」，不是「样本依赖」** —— 换种子重跑这两折：
+
+| 测试例 | seed=42 | seed=1042 | seed=2042 |
+|---|---|---|---|
+| #31 | **0.3598** | 0.8343 | 0.9635 |
+| #73 | **0.3333** | 0.9505 | 0.9418 |
+
+同一例换个种子能从 0.33 变成 0.96，同折不同种子的 Dice 极差最大 **0.6172**。
+⇒ 崩溃是**训练不稳定的一次随机落点**，不是"这两例特别难"。
+
+**干预：混合损失把崩溃压住（同种子、同划分，唯一变量是损失函数）**
+
+| 配置（seed=42） | #31 | #73 | 面积比 |
+|---|---|---|---|
+| `BCE` | 0.3598 | 0.3333 | 4.54 / 4.75 |
+| `BCE + Dice`（0.5×BCE + 0.5×soft-Dice） | **0.8827** | **0.9536** | 1.15 / 1.07 |
+
+跑满 11 折后，标准差从 **0.2414 降到 0.0253**（缩小约 10 倍），最小值从 0.3333 抬到 0.8827。
+
+> ⚠️ 正确表述：这是「**混合损失降低了训练崩溃的概率，使结果不再对种子敏感**」，
+> **不是**「混合损失更准」—— 对照实验里 BCE 换种子也能跑到 0.94~0.96。
+
+**它顺带推翻了 8/3 划分的那次结论**：验证集是 1、13、94，而这三例在留一里恰好是
+0.9677 / 0.9129 / 0.9611 —— **那次划分运气好，恰好没抽到崩溃折**。
+想验证「哪 3 例当验证集」的影响，直接看留一分布即可。
+
+> ⚠️ **口径**：留一给的是 11 例上的结果分布，**仍然不是泛化性能**。它比 8/3 划分强的地方在于
+> 不再有「哪 3 例当验证集」这个运气因素，但样本量小这个根本问题没有被解决，只是被量化了。
+> 另外留一每折用 10 例训练（8/3 划分只用 8 例），训练集更大，两者**不能直接比大小**。
+
+产物：`results/calcaneus_loo_results.csv`（BCE）、`results/calcaneus_loo_results_dicebce.csv`（混合损失）、
+`results/calcaneus_loo.png`、`results/calcaneus_loo_dicebce.png`。
+
+### 7.9 端到端演示
+
+```bash
+python demo_single_case.py            # 自动挑分割最好的一例
+python demo_single_case.py --id 91
+```
+
+一张侧位片进模型 → 掩膜 → 上边界轮廓 → 4 个关键点 → Böhler / Gissane 角，出 4 格演示图
+（`results/calcaneus_demo_case{id}.png`）并在终端打印与参数图印出值的对照。
+
+> 图上写明了：**关键点用的是逐像素反推的参考位置，不是自动提取的**（原因见 7.4 节）。
+> 这条链路应表述为「差一环的全自动」，不要说成「全自动」。
+
+---
 
 | 文件 | 职责 | 关键实现 |
 |---|---|---|
@@ -308,6 +390,21 @@ cuDNN 会自动挑选卷积算法，同一份数据两次运行可能走到不�
 | `train_calcaneus.py` | 训练验证 | 固定随机种子、逐轮记录、按最优验证 Dice 保存权重 |
 | `predict_calcaneus.py` | 预测可视化 | 阈值化、TP/FP/FN 三色叠加图 |
 | `calcaneus_angles.py` | 角度与误差 | 余弦定理、自实现精确欧氏距离变换、中心差分求敏感度、关键点自动提取 |
+| `calcaneus_preprocess.py` | 原始片预处理 | 脱敏重命名、尺寸与灰度统计 |
+
+## 8. 代码模块说明
+
+| 文件 | 职责 | 关键实现 |
+|---|---|---|
+| `calcaneus_dataset.py` | 数据加载 | `CalcaneusDataset`（按文件名编号配对）、`dice_score`、`iou_score` |
+| `unet.py` | 模型定义 | `DoubleConv`、`UNet`（4 层，输出 logits） |
+| `train_calcaneus.py` | 训练验证 | `set_seed`（含 cuDNN 确定性）、逐轮记录、按最优验证 Dice 保存权重 |
+| `predict_calcaneus.py` | 预测可视化 | 阈值化、TP/FP/FN 三色叠加图 |
+| `calcaneus_angles.py` | 角度与误差 | 余弦定理、自实现精确欧氏距离变换、中心差分求敏感度、关键点自动提取 |
+| `analyze_failure_case.py` | 失败案例解剖 | 逐例指标表、6 格解剖图、三条归因假设的数据化判定 |
+| `leave_one_out.py` | 留一交叉验证 | 11 折轮流、`--only`/`--repeats`/`--loss` 诊断选项、`SoftDiceLoss` |
+| `demo_single_case.py` | 端到端演示 | 单例分割 → 轮廓 → 关键点 → 角度，4 格演示图 + 数值卡 |
+| `run_all.py` | 一键复现 | 按序调用全部步骤、固定种子与 hash seed、汇总耗时与成败 |
 | `calcaneus_preprocess.py` | 原始片预处理 | 脱敏重命名、尺寸与灰度统计 |
 
 ## 9. 已知局限与后续计划
@@ -324,7 +421,10 @@ cuDNN 会自动挑选卷积算法，同一份数据两次运行可能走到不�
 - [x] 建立可复现入口（`requirements.txt` + `run_all.py` + 固定种子）—— 2026-10
 - [x] 失败案例分析（`analyze_failure_case.py` + `docs/case13_failure_analysis.md`）—— 2026-10
 - [x] 可复现性实测：量化 GPU 非确定性对指标的影响（见 7.5 节）—— 2026-10
-- [ ] 11 折留一交叉验证：把"3 例验证集"换成"每例都当过测试样本的分布"
+- [x] 11 折留一交叉验证 + 训练崩溃定位与干预（见 7.8 节）—— 2026-10
+- [x] 端到端单例演示（见 7.9 节）—— 2026-10
+- [ ] 把 `BCE + Dice` 设为 `train_calcaneus.py` 的默认损失（需重跑并更新 `results/` 全部依赖模型的产物）
+- [ ] 更多随机种子的留一（`--repeats 3`），把「崩溃概率」从 1/3 量到更稳的数字
 - [ ] 用人工掩膜与预测掩膜分别跑角度流程，把"分割误差"与"关键点定位误差"归因拆开
 - [ ] 取得 B 点的定义规则（**需向数据提供方获取标注脚本**，几何规则已穷尽且失败）
 - [ ] 加入数据增强与类别不平衡处理（注意：11 例上很可能观察不到显著差异，需如实报告）
