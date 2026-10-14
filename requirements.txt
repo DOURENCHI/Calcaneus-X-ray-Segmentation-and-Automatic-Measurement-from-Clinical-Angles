@@ -1,0 +1,24 @@
+# 跟骨 X 光分割与角度测量 —— 运行环境
+#
+# 实测环境（本仓库产物就是在这个环境里跑出来的）：
+#   Python 3.10.21 / Windows 11 / NVIDIA RTX 5060 Laptop (8 GB, 驱动 591.91) / CUDA 12.8
+#
+# 安装：
+#   pip install -r requirements.txt
+#
+# 注意 torch 的 CUDA 版本要从 PyTorch 官方索引装，否则 pip 默认给 CPU 版：
+#   pip install torch==2.11.0 --index-url https://download.pytorch.org/whl/cu128   # CUDA 12.8
+#   （没有 NVIDIA 显卡也能跑，只是慢一些：把 torch 换成 CPU 版即可）
+
+torch==2.11.0
+numpy==2.2.6
+Pillow==12.3.0
+matplotlib==3.10.9
+
+# 下面这个当前 6 个脚本都没有直接 import，仅环境里装了、留作后续接入 MONAI 流程用。
+# 为了让别人更容易跑起来，默认注释掉；要用再解开。
+# monai==1.6.0
+
+# 本仓库刻意不依赖 scipy 与 OpenCV：
+#   距离变换、形态学腐蚀、轮廓提取全部用 numpy 自己实现（见 calcaneus_angles.py）。
+#   目的是让"能跑起来"不依赖编译型扩展包。

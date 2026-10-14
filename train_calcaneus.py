@@ -40,10 +40,21 @@ RESULT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def set_seed(seed=42):
+    """固定所有随机源，保证「同一份数据 + 同一个 seed」能跑出同一组数字。
+
+    两点说明：
+    1. cudnn.deterministic=True 让卷积选用确定性的算法实现，结果可复现，
+       代价是速度略慢；benchmark=False 关掉自动调优，避免每次选到不同算法。
+    2. PYTHONHASHSEED 必须在解释器启动前设置才有意义，所以放在 run_all.py
+       里通过环境变量传给子进程，这里设一次只是兜底。
+    """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    os.environ.setdefault("PYTHONHASHSEED", str(seed))
 
 
 def setup_matplotlib():
