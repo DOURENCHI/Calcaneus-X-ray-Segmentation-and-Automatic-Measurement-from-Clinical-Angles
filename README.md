@@ -136,7 +136,7 @@ Pytorch_calcaneus/
 - Python 3.10 + PyTorch 2.11.0（cu128）+ CUDA
 - 其他：numpy、Pillow、matplotlib（**MONAI 未被任何脚本直接 import**，属可选项）
 - 注：本项目**不依赖 scipy 与 OpenCV**，距离变换与形态学操作用 numpy 自行实现
-- 锁定版本见 `requirements.txt`；实测硬件为 RTX 5060 Laptop（8 GB），没有 GPU 也能跑，只是慢一些
+- 锁定版本见 `requirements.txt`；参考测试环境为单卡 8 GB 显存的消费级 GPU；没有 GPU 也能跑，只是慢一些
 
 **一条命令跑完整条链路（推荐）**
 
@@ -484,7 +484,7 @@ python error_attribution.py --pred-source pkg # 预测掩膜 = 数据包自带�
 - 数据就位后可用 `CALCANEUS_ROOT` 指定路径运行全部流程；找不到数据时 `run_all.py` 会给出明确提示，不会静默失败。
 - `calcaneus_preprocess.py` 会生成 `case_001…` 脱敏副本，并把「原名 → 编号」映射写入 `_PRIVATE_原名映射_切勿公开.csv`。
   该文件已在 `.gitignore` 中排除，**任何情况下都不得上传**。
-- 引用本书面说明时请注意：它说明的是"代码与派生结果可公开"，**不等于患者影像可以公开**。
+- 请注意：本节说明的是「代码与派生结果可公开」，**不等于患者影像可以公开**。
 
 
 ## 11. 参考
