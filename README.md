@@ -3,6 +3,8 @@
 用 PyTorch 实现 U-Net 分割跟骨轮廓，再从轮廓上自动定位解剖关键点、计算 Böhler 角与 Gissane 角，并量化"分割误差会怎样传导成角度误差"。
 
 > 本仓库基于课题组提供的跟骨侧位 X 光标注数据，重点是**方法复现与误差分析**：角度口径通过逐像素反推已有结果图得到，不依赖原始标注脚本。
+>
+> **技术说明文档（17 页，含全部插图）**：[`docs/technical_note.pdf`](docs/technical_note.pdf) —— 按「临床背景与任务定义 → 数据 → 方法 → 结果 → 局限 → 复现」组织的完整说明。本文档中的每个数字都可对应到仓库里的脚本与结果文件。
 
 ---
 
@@ -112,6 +114,7 @@ Pytorch_calcaneus/
 ├── run_all.py                  ★ 一键复现入口：按顺序跑完全部步骤
 ├── requirements.txt            依赖与版本锁定
 ├── docs/
+│   ├── technical_note.pdf           技术说明文档（17 页，含图，本文全部结论的展开版）
 │   └── case13_failure_analysis.md   第 13 例失败案例的完整解剖（配图 + 数据化归因）
 ├── .gitignore
 ├── README.md
