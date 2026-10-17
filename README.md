@@ -196,9 +196,13 @@ python calcaneus_preprocess.py
 数据根目录通过候选路径自动探测，也可用环境变量覆盖：
 
 ```bash
-set CALCANEUS_ROOT=D:\你的路径\result\result      # Windows
-set CALCANEUS_RAW=D:\你的路径\跟骨1                # 原始片目录
+set CALCANEUS_ROOT=D:\你的路径\result\result      # 标注数据根目录（images/ 与 labels/ 的上一级）
+set CALCANEUS_RAW=D:\你的路径\跟骨1                # 原始片目录（仅 calcaneus_preprocess.py 使用）
+set CALCANEUS_OUT=D:\你的路径\跟骨_预处理          # 原始片预处理输出目录（可选，也可用 --out 指定）
 ```
+
+> 路径都是**自动探测**的：`calcaneus_dataset.py` 与 `calcaneus_preprocess.py` 各自维护一份候选列表，
+> 且只认**确实含图片/标注**的目录，所以目录改名或换嵌套层级后一般不用改代码。找不到时会打印试过的完整路径列表。
 
 ## 7. 实验结果与口径
 

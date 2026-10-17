@@ -16,6 +16,13 @@
 用法：
     & "D:\\Miniconda\\envs\\medimg\\python.exe" calcaneus_preprocess.py
     & "D:\\Miniconda\\envs\\medimg\\python.exe" calcaneus_preprocess.py --no-copy
+    & "D:\\Miniconda\\envs\\medimg\\python.exe" calcaneus_preprocess.py --out D:\\某个目录
+
+路径解析：
+    原片目录按 _RAW_CANDIDATES 依次探测（只认**确实含图片**的目录），
+    也可用环境变量 CALCANEUS_RAW 直接指定；
+    输出目录默认 = 原片容器的上一级 / <容器名>_预处理，
+    也可用 --out 或环境变量 CALCANEUS_OUT 指定。
 """
 
 import argparse
@@ -30,12 +37,31 @@ from PIL import Image
 # ---------------------------------------------------------------------
 # 路径：同样不写死，按候选列表探测
 # ---------------------------------------------------------------------
+_IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
+
+# 顺序 = 优先级。目录被改过名（2026-10 起 跟骨1 → 跟骨/跟骨1），所以新旧都留着。
 _RAW_CANDIDATES = [
-    Path(r"D:\工程\方向与规划\项目\跟骨\跟骨1\跟骨1"),
-    Path(r"D:\论文\方向与规划\项目\跟骨\跟骨1\跟骨1"),
+    Path(r"D:\工程\方向与规划\项目\跟骨\跟骨\跟骨1"),      # 2026-10 起的结构
+    Path(r"D:\工程\方向与规划\项目\跟骨\跟骨"),            # 若原片被拍平到这一层
+    Path(r"D:\工程\方向与规划\项目\跟骨\跟骨1\跟骨1"),      # 旧结构
     Path(r"D:\工程\方向与规划\项目\跟骨\跟骨1"),
+    Path(r"D:\论文\方向与规划\项目\跟骨\跟骨\跟骨1"),
+    Path(r"D:\论文\方向与规划\项目\跟骨\跟骨1\跟骨1"),
     Path(r"D:\论文\方向与规划\项目\跟骨\跟骨1"),
 ]
+
+
+def _has_images(d: Path) -> bool:
+    """该目录**自身**（不递归）是否含图片文件。
+
+    只看"非空"是不够的：外层容器目录（如 ...\\跟骨）非空，但里面只有一个子目录，
+    被选中后会在统计阶段扫到 0 张图。
+    """
+    try:
+        return d.is_dir() and any(
+            p.is_file() and p.suffix.lower() in _IMG_EXTS for p in d.iterdir())
+    except OSError:
+        return False
 
 
 def find_raw_dir():
@@ -43,16 +69,33 @@ def find_raw_dir():
     if env and Path(env).exists():
         return Path(env)
     for c in _RAW_CANDIDATES:
-        if c.exists() and any(c.iterdir()):
+        if _has_images(c):
             return c
-    raise FileNotFoundError("没有找到原始片目录，请设置环境变量 CALCANEUS_RAW")
+    tried = "\n  ".join(str(c) for c in _RAW_CANDIDATES)
+    raise FileNotFoundError(
+        "没有找到原始片目录。请用环境变量 CALCANEUS_RAW 指定，"
+        "或把原片放到下列任一位置：\n  " + tried)
 
 
-def find_output_dir(raw: Path):
-    # 跟骨1/跟骨1 这种嵌套结构时，输出放在最外层的“跟骨1”旁边
-    base = raw.parent if raw.name == raw.parent.name else raw
-    out = base.parent / "跟骨1_预处理"
-    return out
+def find_output_dir(raw: Path, out=None):
+    """脱敏副本的输出目录。
+
+    优先级：--out 参数 > CALCANEUS_OUT 环境变量 > 默认规则。
+    默认规则：放在「容纳原片那一层目录」的**上一级**，命名为 <该层目录名>_预处理。
+    两种常见结构都落在同一个位置：
+
+        ...\\跟骨\\跟骨1\\跟骨1   ->   ...\\跟骨\\跟骨_预处理
+        ...\\跟骨\\跟骨\\跟骨1    ->   ...\\跟骨\\跟骨_预处理
+    """
+    if out:
+        return Path(out)
+    env = os.environ.get("CALCANEUS_OUT")
+    if env:
+        return Path(env)
+    container = raw.parent
+    if raw.name == container.name:       # 同名重复嵌套：跟骨1/跟骨1
+        container = container.parent
+    return container.parent / (container.name + "_预处理")
 
 
 def img_stats(gray: np.ndarray):
@@ -65,13 +108,15 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-copy", action="store_true", help="只统计，不生成脱敏副本")
     ap.add_argument("--thumb", type=int, default=160, help="拼图缩略图边长")
+    ap.add_argument("--out", default=None,
+                    help="脱敏副本的输出目录（默认 ..\\<容器目录名>_预处理）")
     args = ap.parse_args()
 
     raw = find_raw_dir()
-    out = find_output_dir(raw)
+    out = find_output_dir(raw, args.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    exts = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
+    exts = _IMG_EXTS
     files = sorted([p for p in raw.iterdir() if p.is_file() and p.suffix.lower() in exts],
                    key=lambda p: p.name)
 
@@ -86,7 +131,12 @@ def main():
     print("扩展名分布 : " + ", ".join(f"{k}×{v}" for k, v in ext_count.most_common()))
     stems = Counter(p.stem for p in files)
     dup = {k: v for k, v in stems.items() if v > 1}
-    print(f"不同文件名 : {len(stems)} 个" + (f"，重复主名: {dup}" if dup else ""))
+    # 注意：这里**不能**打印重名的主名 —— 主名就是患者姓名，一旦打到终端，
+    # 截图、录屏、日志都会把它带出去，与本脚本的脱敏目的相悖。只报告组数。
+    msg = f"不同文件名 : {len(stems)} 个"
+    if dup:
+        msg += f"，其中 {len(dup)} 组重名（主名不打印；一个病例有两份文件，脱敏后会得到两个编号）"
+    print(msg)
     print()
 
     gray_dir = out / "images_gray"
